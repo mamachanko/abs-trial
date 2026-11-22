@@ -1,0 +1,26 @@
+[project]
+name = "agent-sandbox"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["typer>=0.16,<1"]
+
+[project.scripts]
+asb = "asb.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "asb"
+
+[dependency-groups]
+dev = ["pytest", "pytest-cov", "coverage>=7.10.6", "ruff"]
+
+[tool.coverage.run]
+patch = ["subprocess"]
+branch = true
+source = ["asb"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=asb --cov-report=term-missing"
