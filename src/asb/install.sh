@@ -53,97 +53,6 @@ verify_version() {
     }
     "$claw" --version
 }
-ready() {
-    curl -fsS --max-time 2 http://127.0.0.1:18789/readyz 2>/dev/null |
-        "$node" -e \
-        'try {process.exit(JSON.parse(require("fs").readFileSync(0)).ready === true ? 0 : 1)} catch {process.exit(1)}'
-}
-gateway_current() {
-    "$claw" gateway probe --json --timeout 30000 2>/dev/null |
-        "$node" -e '
-        try {
-            const probe = JSON.parse(require("fs").readFileSync(0));
-            process.exit(probe.targets?.some(t => t.url === "ws://127.0.0.1:18789" && t.server?.version === process.argv[1]) ? 0 : 1);
-        } catch { process.exit(1); }' "$version"
-}
-# The CLI can respawn Node children. Its lifecycle lock identifies the gateway itself.
-find_gateway() {
-    local pid
-    pid=$("$node" - "$state/gateway.log" \
-        "$HOME/.openclaw/tmp/openclaw-$(id -u)/gateway.state.lock" "$node" <<'NODE'
-const fs = require("fs");
-const [log, lockPath, node] = process.argv.slice(2);
-let lock;
-try { lock = JSON.parse(fs.readFileSync(lockPath)); } catch { process.exit(0); }
-if (!Number.isSafeInteger(lock.pid) || lock.pid <= 0 || !Number.isSafeInteger(lock.startTime)) process.exit(0);
-const proc = `/proc/${lock.pid}`;
-let start;
-try {
-    const stat = fs.readFileSync(`${proc}/stat`, "utf8");
-    start = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]);
-} catch { process.exit(0); }
-if (start !== lock.startTime) process.exit(0);
-try {
-    if (fs.readlinkSync(`${proc}/exe`) !== fs.realpathSync(node) ||
-        fs.readlinkSync(`${proc}/fd/1`) !== log ||
-        (lock.role && lock.role !== "gateway") || (lock.port && lock.port !== 18789)) {
-        throw new Error("ownership mismatch");
-    }
-} catch {
-    console.error("Gateway lock belongs to another process. Inspect openclaw gateway status --deep before retrying.");
-    process.exit(1);
-}
-console.log(lock.pid);
-NODE
-    ) || return 1
-    if [[ -z "$pid" ]] && ready; then
-        echo 'Gateway is reachable without a usable ASB lock. Inspect openclaw gateway status --deep and stop its owner manually, then retry.' >&2
-        return 1
-    fi
-    printf '%s\n' "$pid"
-}
-stop_gateway() {
-    local pid=$1 birth current
-    [[ -n "$pid" ]] || return 0
-    birth=$(awk '{print $22}' "/proc/$pid/stat")
-    # Recheck ownership immediately before signaling; stale PID files are never trusted.
-    current=$(find_gateway) || return 1
-    [[ "$current" == "$pid" && $(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null) == "$birth" ]] || {
-        echo 'Gateway ownership changed. Retry the upgrade.' >&2; return 1
-    }
-    kill -- "$pid"
-    for ((i=0; i<30; i++)); do
-        [[ $(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true) != "$birth" ]] && break
-        sleep 1
-    done
-    current=$(find_gateway) || return 1
-    [[ -z "$current" ]] || {
-        echo 'ASB gateway did not stop. Inspect its process before retrying.' >&2; return 1
-    }
-}
-start_gateway() {
-    local pid
-    pid=$(find_gateway) || return 1
-    if [[ -n "$pid" ]]; then
-        if ready && gateway_current; then return 0; fi
-        echo "A gateway is already running. Use asb upgrade --to $version to restart it." >&2
-        return 1
-    fi
-    nohup "$claw" gateway run --bind loopback --port 18789 \
-        </dev/null >"$state/gateway.log" 2>&1 9>&- &
-    pid=$!
-    for ((i=0; i<90; i++)); do
-        if ready; then
-            find_gateway >/dev/null || return 1
-            if gateway_current; then return 0; fi
-            break
-        fi
-        if ! kill -0 "$pid" 2>/dev/null; then break; fi
-        sleep 1
-    done
-    echo "Gateway failed to start at version $version. Inspect $state/gateway.log inside the container, then retry." >&2
-    return 1
-}
 current=$(installed_version || true)
 if [[ "$action" == upgrade ]]; then
     if [[ -z "$current" ]]; then
@@ -153,32 +62,32 @@ if [[ "$action" == upgrade ]]; then
     elif [[ $(printf '%s\n%s\n' "$current" "$version" | sort -V | head -n1) != "$current" ]]; then
         echo "Refusing to downgrade OpenClaw $current to $version." >&2; exit 1
     fi
-    pid=$(find_gateway) || exit 1
-    if [[ "$current" == "$version" && -n "$pid" ]] && ready && gateway_current; then
-        echo "OpenClaw $version gateway is already current."
+    if [[ "$current" == "$version" ]]; then
+        gateway_start "$version" --restart-if-needed
+        rm -f "$state/upgrade-target"
         exit 0
     fi
-    if [[ "$current" != "$version" ]]; then
-        prepare_installer
-        # Reject an unavailable release while the old gateway can still serve requests.
-        available=$(PATH="$HOME/.local/tools/node/bin:$PATH" npm_config_cache="$tmp/npm-cache" \
-            "$node" "$HOME/.local/tools/node/lib/node_modules/npm/bin/npm-cli.js" \
-            view "openclaw@$version" version --fetch-retries 1 --fetch-timeout 30000)
-        [[ "$available" == "$version" ]] || { echo "OpenClaw $version is unavailable." >&2; exit 1; }
-    fi
-    stop_gateway "$pid"
+
+    prepare_installer
+    # Check the release before taking the existing gateway offline.
+    available=$(PATH="$HOME/.local/tools/node/bin:$PATH" npm_config_cache="$tmp/npm-cache" \
+        "$node" "$HOME/.local/tools/node/lib/node_modules/npm/bin/npm-cli.js" \
+        view "openclaw@$version" version --fetch-retries 1 --fetch-timeout 30000)
+    [[ "$available" == "$version" ]] || { echo "OpenClaw $version is unavailable." >&2; exit 1; }
+
+    gateway_stop
     printf '%s\n' "$version" > "$state/upgrade-target.tmp"
     mv "$state/upgrade-target.tmp" "$state/upgrade-target"
-    if [[ "$current" != "$version" ]] && ! install_package; then
+    if ! install_package; then
         if [[ -n "$current" && $(installed_version || true) == "$current" ]]; then
             echo "Upgrade failed; restarting the intact OpenClaw $current gateway." >&2
-            version="$current" start_gateway || true
+            gateway_start "$current" || true
         fi
         echo "Package installation failed. Retry asb upgrade --to $version." >&2
         exit 1
     fi
     verify_version
-    start_gateway
+    gateway_start "$version"
     rm -f "$state/upgrade-target"
     exit 0
 fi
@@ -278,4 +187,4 @@ model_ready || { echo "Model failed to start. See $backend/server.log" >&2; exit
 }
 CONFIG
 "$claw" config validate
-start_gateway
+gateway_start "$version"

@@ -215,3 +215,29 @@ def test_upgrade_preserves_lab_and_serves_local_reply(ubuntu_lab):
         == "Europe/Berlin"
     )
     assert_local_reply(container)
+
+
+def test_unavailable_upgrade_keeps_original_gateway_serving(ubuntu_lab):
+    log.info("Installing the baseline and verifying its live gateway version")
+    baseline = "2026.11.5"
+    subprocess.run(
+        ["asb", "install", "--container", ubuntu_lab, "--version", baseline],
+        check=True,
+        timeout=1500,
+    )
+    assert_gateway_version(ubuntu_lab, baseline)
+
+    missing = "9999.1.1"
+    log.info("Requesting unpublished OpenClaw release %s", missing)
+    result = subprocess.run(
+        ["asb", "openclaw", "upgrade", "--container", ubuntu_lab, "--to", missing],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+    )
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert missing in result.stderr, result.stderr
+    assert "E404" in result.stderr, result.stderr
+    assert_gateway_version(ubuntu_lab, baseline)
+    assert_local_reply(ubuntu_lab)
