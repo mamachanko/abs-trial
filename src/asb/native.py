@@ -42,7 +42,10 @@ def _run_install(container: str, action: str, version: str) -> str:
                 action,
                 version,
             ],
-            input=files("asb").joinpath("install.sh").read_text(),
+            input="\n".join(
+                files("asb").joinpath(script).read_text()
+                for script in ("gateway.sh", "install.sh")
+            ),
             text=True,
             check=True,
             timeout=1200,
