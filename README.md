@@ -51,3 +51,25 @@ sends a geography question through the gateway. It checks that the reply names P
 provider and model ID, and positive output token count. Finally it stops the
 container, checks that ASB reports the outage, and removes the container.
 Add `-s` to see installer output. Run `uv run --locked pytest` for the full suite.
+
+## Test an OpenClaw upgrade
+
+Run just the upgrade case with live progress:
+
+```sh
+uv run --locked pytest -v --log-cli-level=INFO \
+  tests/test_openclaw.py::test_upgrade_preserves_lab_and_serves_local_reply
+```
+
+The test installs 2026.11.5 and reads the version reported by the running
+gateway. It saves a workspace note and a custom setting, runs
+`asb openclaw upgrade --to 2026.11.6` in the same lab, and checks the new
+gateway version, the saved state, and a fresh reply from the local model.
+
+To try this manually in a freshly prepared lab:
+
+```sh
+uv run asb install --version 2026.11.5
+uv run asb openclaw upgrade --to 2026.11.6
+uv run asb status
+```
