@@ -3,7 +3,7 @@
 ASB installs OpenClaw and a small local language model on an Ubuntu 24.04
 lab machine. The machine is a Docker container. Inside it, the OpenClaw gateway
 listens on loopback port 18789 and uses llama.cpp on loopback port 18080 to run
-Qwen2.5-0.5B-Instruct (Q4_K_M) on the CPU.
+LiquidAI LFM2.5-350M on the CPU. The lab downloads the 229 MB Q4_K_M weights.
 
 ## Install and send a message
 
@@ -34,6 +34,7 @@ install downloads the runtime and weights. The lab agent uses `lab/asb-local`
 as its default model, with an empty fallback list and tools disabled for text
 interaction. `asb status` reports gateway readiness.
 
+To switch an existing ASB lab from Qwen to LFM2.5, rerun `uv run asb install`.
 The lab keeps its configuration and downloads in the container. After a
 container restart, rerun `uv run asb install` to start the processes.
 To delete the lab and its installed state, run `docker rm -f asb-lab`.
