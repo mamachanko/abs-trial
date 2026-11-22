@@ -1,7 +1,8 @@
-import json
 import re
 import subprocess
 from importlib.resources import files
+
+from .readiness import is_ready
 
 DEFAULT_VERSION = "2026.11.6"
 
@@ -87,9 +88,9 @@ def status(container: str) -> str:
             f"{container}: gateway unavailable. {result.stderr.strip() or result.stdout.strip()}"
         )
     try:
-        reply = json.loads(result.stdout)
+        ready = is_ready(result.stdout)
     except ValueError as exc:
         raise RuntimeError(f"{container}: invalid readiness response.") from exc
-    if not isinstance(reply, dict) or reply.get("ready") is not True:
+    if not ready:
         raise RuntimeError(f"{container}: gateway is not ready.")
     return f"{container}: OpenClaw gateway ready."

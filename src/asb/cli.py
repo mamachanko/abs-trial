@@ -1,4 +1,3 @@
-import json
 from http.client import HTTPException
 from typing import Annotated
 from urllib.error import HTTPError
@@ -8,6 +7,7 @@ from urllib.request import urlopen
 import typer
 
 from . import native
+from .readiness import is_ready
 
 _HELP_SETTINGS = {"help_option_names": ["-h", "--help"]}
 app = typer.Typer(
@@ -115,7 +115,7 @@ def _gateway_status(gateway: str):
         ) from exc
     try:
         with urlopen(gateway.rstrip("/") + "/readyz", timeout=5) as response:
-            payload = json.load(response)
+            ready = is_ready(response.read())
     except HTTPError as exc:
         typer.echo(f"Gateway readiness check returned HTTP {exc.code}.", err=True)
         raise typer.Exit(1) from exc
@@ -126,7 +126,7 @@ def _gateway_status(gateway: str):
         typer.echo("Invalid gateway readiness response.", err=True)
         raise typer.Exit(1) from exc
 
-    if not isinstance(payload, dict) or payload.get("ready") is not True:
+    if not ready:
         typer.echo("Gateway did not report ready.", err=True)
         raise typer.Exit(1)
     typer.echo("OpenClaw gateway ready.")
