@@ -1,10 +1,28 @@
 import json
+import re
 import subprocess
 from importlib.resources import files
 
+DEFAULT_VERSION = "2026.11.6"
 
-def install(container: str) -> str:
+
+def install(container: str, version: str = DEFAULT_VERSION) -> str:
     """Bootstrap the Ubuntu lab and start its user-owned gateway."""
+    return _run_install(container, "install", version)
+
+
+def upgrade(container: str, to: str) -> str:
+    """Upgrade the lab's OpenClaw package and restart its gateway."""
+    return _run_install(container, "upgrade", to)
+
+
+def _run_install(container: str, action: str, version: str) -> str:
+    if (
+        re.fullmatch(r"[1-9][0-9]{3}\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version)
+        is None
+    ):
+        raise ValueError("Expected an exact numeric OpenClaw release (YYYY.M.N).")
+    operation = "Installation" if action == "install" else "Upgrade"
     try:
         subprocess.run(
             [
@@ -19,6 +37,9 @@ def install(container: str) -> str:
                 container,
                 "bash",
                 "-s",
+                "--",
+                action,
+                version,
             ],
             input=files("asb").joinpath("install.sh").read_text(),
             text=True,
@@ -26,12 +47,13 @@ def install(container: str) -> str:
             timeout=1200,
         )
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"Installation on {container} timed out.") from exc
+        raise RuntimeError(f"{operation} on {container} timed out.") from exc
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(
-            f"Installation on {container} failed. See the output above."
+            f"{operation} on {container} failed. See the output above."
         ) from exc
-    return status(container)
+    result = status(container)
+    return f"{result} OpenClaw {version}."
 
 
 def status(container: str) -> str:
