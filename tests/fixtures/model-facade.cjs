@@ -30,12 +30,19 @@ createServer(async (request, response) => {
     return;
   }
   // OpenClaw can append another user message after the original prompt.
-  const userMessages = Array.isArray(body?.messages)
-    ? body.messages.filter(message => message?.role === "user").map(message => message.content)
-    : [];
-  const nonce = JSON.stringify(userMessages).match(/\basb-check-([a-f0-9]{32})\b/)?.[1];
-  if (body?.model !== model || body.stream !== true || !nonce) {
-    response.writeHead(400).end("Expected a streaming asb-local turn with a test nonce");
+  if (body?.model !== model || body.stream !== true || !Array.isArray(body.messages)) {
+    response.writeHead(400).end("Expected a streaming asb-local chat request");
+    return;
+  }
+  const userText = body.messages
+    .filter(message => message.role === "user")
+    .flatMap(message => Array.isArray(message.content)
+      ? message.content.filter(part => part.type === "text").map(part => part.text)
+      : [message.content])
+    .join("\n");
+  const nonce = userText.match(/\basb-check-([a-f0-9]{32})\b/)?.[1];
+  if (!nonce) {
+    response.writeHead(400).end("Missing asb-check ID in user text");
     return;
   }
 
