@@ -1,75 +1,99 @@
-# Agent Sandbox
+# Agent Sandbox (ASB)
 
-ASB installs OpenClaw and a small local language model on an Ubuntu 24.04
-lab machine. The machine is a Docker container. Inside it, the OpenClaw gateway
-listens on loopback port 18789 and uses llama.cpp on loopback port 18080 to run
-LiquidAI LFM2.5-350M on the CPU. The lab downloads the 229 MB Q4_K_M weights.
+ASB is a Python CLI for installing and upgrading OpenClaw on a disposable Ubuntu machine. Start with clean Linux, ask a local model a question, then upgrade OpenClaw in place. CI runs the same commands and checks that the gateway can still answer.
 
-## Install and send a message
+Docker supplies the Ubuntu machine that stands in for a VPS. The image build uses `apt-get` for OS prerequisites such as Git and curl. ASB runs on the host and installs Node, OpenClaw, and the CPU model **inside the running container** as the `ubuntu` user. [Lab Dockerfile](lab/Dockerfile)
 
-From this directory on an x86_64 Linux Docker host with uv:
+## Watch a clean install answer its first question
+
+Use an x86_64 Linux Docker host with internet access for the initial downloads. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) if your shell can't find it. Run the examples from the repository root. For a fresh checkout, use `git clone https://github.com/mamachanko/abs-trial.git asb` and `cd asb`.
 
 ```sh
-# Prepare the disposable Ubuntu machine and its OS prerequisites.
+uv sync --locked --python 3.12
+uv run --locked pytest -v -s --log-cli-level=INFO \
+  tests/test_openclaw.py::test_native_install_on_clean_ubuntu
+```
+
+Pytest creates its own Ubuntu 24.04 container and checks that Node and OpenClaw are absent. It calls `asb install`, checks the gateway, and asks for the capital of France. A successful turn produces a log entry like this.
+
+```text
+Reply from lab/asb-local: The capital of France is Paris.
+```
+
+The test checks the answer, the provider and model ID, and a positive output token count. It then stops the container, checks that `asb status` reports the outage, and removes the lab. `--log-cli-level=INFO` shows what pytest is checking. `-s` also shows the installer output.
+
+## Keep a lab to use yourself
+
+Build the Ubuntu image, start a container named `asb-lab`, and install OpenClaw.
+
+```sh
 docker build -t asb-ubuntu-lab lab
 docker run -d --init --name asb-lab asb-ubuntu-lab
+uv run --locked asb install
+uv run --locked asb status
+```
 
-# Install as the container's ubuntu user.
-uv run asb install
-uv run asb status
+Expect `asb-lab: OpenClaw gateway ready.` The default install includes Node 24.22.1, OpenClaw 2026.11.6, and LiquidAI LFM2.5-350M (229 MB of model weights). The gateway listens on port 18789 and sends inference requests to llama.cpp on port 18080. Both listen on loopback inside the container.
 
-# Send a turn through the installed gateway to its default model.
+Send a prompt with the installed OpenClaw CLI.
+
+```sh
 docker exec -u ubuntu asb-lab /home/ubuntu/.local/bin/openclaw agent \
-  --agent main --message "What is the capital of France? Answer with just the name of the city."
+  --agent main --message 'What is the capital of France? Answer with just the name of the city.' --json
 ```
 
-Add `--json` to the agent command to inspect the reply, model ID, provider,
-and token usage. Use `uv run asb -h` to list commands. Select a different
-container with `--container NAME` on install or status.
+Read the reply in `result.payloads`. Under `result.meta.agentMeta`, the provider should be `lab` and the model should be `asb-local`.
 
-The image build installs OS packages. `asb install` runs as the unprivileged
-`ubuntu` user. It installs Node 24.22.1, OpenClaw 2026.11.6, the CPU inference
-server, and model weights, then configures and starts both services. The first
-install downloads the runtime and weights. The lab agent uses `lab/asb-local`
-as its default model, with an empty fallback list and tools disabled for text
-interaction. `asb status` reports gateway readiness.
+### Upgrade in place
 
-To switch an existing ASB lab from Qwen to LFM2.5, rerun `uv run asb install`.
-The lab keeps its configuration and downloads in the container. After a
-container restart, rerun `uv run asb install` to start the processes.
-To delete the lab and its installed state, run `docker rm -f asb-lab`.
-
-## Watch the integration test
+To try the upgrade that CI tests, start a second container from the image you built above.
 
 ```sh
-uv run --locked pytest -v --log-cli-level=INFO tests/test_openclaw.py
+docker run -d --init --name asb-upgrade-lab asb-ubuntu-lab
+uv run --locked asb install --container asb-upgrade-lab --version 2026.11.5
+uv run --locked asb upgrade --container asb-upgrade-lab --to 2026.11.6
+uv run --locked asb status --container asb-upgrade-lab
 ```
 
-Pytest builds the lab image and creates a fresh container. It checks that Node
-and OpenClaw are absent, invokes ASB, checks the versions and configuration, and
-sends a geography question through the gateway. It checks that the reply names Paris, local
-provider and model ID, and positive output token count. Finally it stops the
-container, checks that ASB reports the outage, and removes the container.
-Add `-s` to see installer output. Run `uv run --locked pytest` for the full suite.
+Use an exact release with `--to`. ASB checks that the release is available before stopping the gateway. After installing the package, ASB confirms the **running gateway** reports the requested version. OpenClaw keeps its configuration and workspace in the same container.
 
-## Test an OpenClaw upgrade
+### Inspect, restart, or remove a lab
 
-Run just the upgrade case with live progress:
+- **Commands.** Run `uv run --locked asb -h` for help. The commands are `install`, `upgrade`, and `status`. Each also works under `asb openclaw`.
+- **Target.** ASB defaults to `asb-lab`. Select another running container with `--container NAME` or set `ASB_CONTAINER`. To check a gateway already reachable from the host, run `uv run --locked asb status --gateway URL`. ASB requests `/readyz`.
+- **Logs.** Inspect the gateway and inference processes separately.
+
+  ```sh
+  docker exec -u ubuntu asb-lab tail -n 30 /home/ubuntu/.local/state/asb/gateway.log
+  docker exec -u ubuntu asb-lab tail -n 30 /home/ubuntu/.local/share/asb-model/server.log
+  ```
+
+- **Restart.** A stopped container keeps its files. For the default lab, run `docker start asb-lab`, then `uv run --locked asb install` to start both processes again. If you installed a different release, pass its version to `install --version`.
+- **Older Qwen labs.** Rerun `uv run --locked asb install` in the default lab to switch its local model to LFM2.5.
+- **Cleanup.** Removing a container deletes its workspace, configuration, and downloaded weights. Remove each lab when you finish with it.
+
+  ```sh
+  docker rm -f asb-lab
+  docker rm -f asb-upgrade-lab
+  ```
+
+## What CI verifies
+
+Each integration test gets a fresh container and drives the installed tools. [Integration tests](tests/test_openclaw.py)
+
+| Scenario | What must happen |
+| --- | --- |
+| Clean install | ASB installs Node and OpenClaw. The local model answers through the gateway. Stopping the container makes `asb status` fail. |
+| Invalid configuration | OpenClaw rejects `gateway.mode=sideways`, retains `local`, and the gateway stays ready. |
+| In-place upgrade | The live gateway moves from 2026.11.5 to 2026.11.6. A workspace note and a custom timezone survive, and the local model answers a fresh prompt. |
+| Unavailable release | ASB rejects the upgrade. The gateway still reports its original version and answers through the local model. |
+
+To watch just the two upgrade cases, run `uv run --locked pytest -v -s --log-cli-level=INFO -k upgrade tests/test_openclaw.py`.
+
+Run the same lint, format, and test checks as GitHub Actions. Pytest reports Python line and branch coverage. [CI workflow](.github/workflows/ci.yml)
 
 ```sh
-uv run --locked pytest -v --log-cli-level=INFO \
-  tests/test_openclaw.py::test_upgrade_preserves_lab_and_serves_local_reply
-```
-
-The test installs 2026.11.5 and reads the version reported by the running
-gateway. It saves a workspace note and a custom setting, runs
-`asb openclaw upgrade --to 2026.11.6` in the same lab, and checks the new
-gateway version, the saved state, and a fresh reply from the local model.
-
-To try this manually in a freshly prepared lab:
-
-```sh
-uv run asb install --version 2026.11.5
-uv run asb openclaw upgrade --to 2026.11.6
-uv run asb status
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked pytest -q
 ```
