@@ -13,7 +13,17 @@ RECEIPTS = "/home/ubuntu/facade-receipts.jsonl"
 
 
 def docker(*args):
-    return subprocess.check_output(["docker", *args], text=True, timeout=300).strip()
+    result = subprocess.run(
+        ["docker", *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        timeout=300,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"docker {args[0]} exited {result.returncode}\n{result.stdout}"
+    )
+    return result.stdout.strip()
 
 
 @pytest.fixture
