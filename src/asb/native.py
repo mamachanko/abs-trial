@@ -7,9 +7,13 @@ from .readiness import is_ready
 DEFAULT_VERSION = "2026.11.6"
 
 
-def install(container: str, version: str = DEFAULT_VERSION) -> str:
+def install(
+    container: str, version: str = DEFAULT_VERSION, *, skip_local_model: bool = False
+) -> str:
     """Bootstrap the Ubuntu lab and start its user-owned gateway."""
-    return _run_install(container, "install", version)
+    return _run_install(
+        container, "install", version, skip_local_model=skip_local_model
+    )
 
 
 def upgrade(container: str, to: str) -> str:
@@ -17,7 +21,9 @@ def upgrade(container: str, to: str) -> str:
     return _run_install(container, "upgrade", to)
 
 
-def _run_install(container: str, action: str, version: str) -> str:
+def _run_install(
+    container: str, action: str, version: str, *, skip_local_model: bool = False
+) -> str:
     if (
         re.fullmatch(r"[1-9][0-9]{3}\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version)
         is None
@@ -41,10 +47,11 @@ def _run_install(container: str, action: str, version: str) -> str:
                 "--",
                 action,
                 version,
+                *(["--skip-local-model"] if skip_local_model else []),
             ],
             input="\n".join(
                 files("asb").joinpath(script).read_text()
-                for script in ("gateway.sh", "install.sh")
+                for script in ("gateway.sh", "model.sh", "install.sh")
             ),
             text=True,
             check=True,

@@ -1,0 +1,23 @@
+{"model": "smol", "wall": 34.62, "input": 1986, "output": 17, "reply": "The current date is 2026-11-22.", "ok": false}
+{"model": "lfm", "wall": 23.88, "input": 1898, "output": 64, "reply": "## OpenClaw Runtime Context\n\n```json\n{\n  \"sender\": {\n    \"id\": \"agent:main\"\n  },\n  \"timestamp\": \"2026-11-22T06:39:00Z\",\n  \"timezone\": \"UTC\"\n}\n```\n\nThis OpenClaw runtime \u26a0\ufe0f Reply truncated at the model's output token limit. The text above is partial \u2014 ask to continue it.", "ok": false}
+{"model": "gemma_builtin", "wall": 20.63, "input": 1893, "output": 35, "reply": "Okay, I understand. I will now respond to the prompt based on the provided context. I will use the available tools and the \"current date\" to respond.", "ok": false}
+{"model": "q4", "wall": 33.56, "input": 1764, "output": 8, "reply": "The capital of France is Paris.", "ok": true}
+{"model": "qwen", "wall": 51.9, "input": 1764, "output": 2, "reply": "Paris", "ok": true}
+{"model": "q4", "wall": 31.79, "input": 1764, "output": 8, "reply": "The capital of France is Paris.", "ok": true}
+{"model": "qwen", "wall": 36.84, "input": 1764, "output": 2, "reply": "Paris", "ok": true}
+{"model": "q4", "wall": 31.52, "input": 1764, "output": 8, "reply": "The capital of France is Paris.", "ok": true}
+{"model": "qwen", "wall": 34.34, "input": 1764, "output": 2, "reply": "Paris", "ok": true}
+{"model": "q4", "wall": 29.11, "input": 1764, "output": 8, "reply": "The capital of France is Paris.", "ok": true}
+{"model": "qwen", "wall": 35.02, "input": 1764, "output": 2, "reply": "Paris", "ok": true}
+{"model": "q4", "wall": 28.81, "input": 1764, "output": 8, "reply": "The capital of France is Paris.", "ok": true}
+{"model": "qwen", "wall": 35.3, "input": 1764, "output": 2, "reply": "Paris", "ok": true}
+{"model": "lfm25", "wall": 19.29, "input": 1898, "output": 8, "reply": "The capital of France is Paris.", "ok": true}
+{"model": "qwen", "wall": 45.21, "input": 1764, "output": 2, "reply": "Paris", "ok": true}
+{"model": "lfm25", "wall": 20.02, "input": 1898, "output": 8, "reply": "The capital of France is Paris.", "ok": true}
+{"model": "qwen", "wall": 33.62, "input": 1764, "output": 2, "reply": "Paris", "ok": true}
+{"model": "lfm25", "wall": 18.05, "input": 1898, "output": 8, "reply": "The capital of France is Paris.", "ok": true}
+{"model": "qwen", "wall": 35.4, "input": 1764, "output": 2, "reply": "Paris", "ok": true}
+{"model": "lfm25", "wall": 19.03, "input": 1898, "output": 8, "reply": "The capital of France is Paris.", "ok": true}
+{"model": "qwen", "wall": 38.8, "input": 1764, "output": 2, "reply": "Paris", "ok": true}
+{"model": "lfm25", "wall": 21.36, "input": 1898, "output": 8, "reply": "The capital of France is Paris.", "ok": true}
+{"model": "qwen", "wall": 33.54, "input": 1764, "output": 2, "reply": "Paris", "ok": true}

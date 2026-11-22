@@ -14,4 +14,7 @@ jobs:
       - run: uv sync --locked --python 3.12
       - run: uv run --locked ruff check .
       - run: uv run --locked ruff format --check .
-      - run: uv run --locked pytest -q
+      - name: CLI and gateway maintenance tests
+        run: uv run --locked pytest -q -m "not real_model"
+      - name: Real-model smoke test
+        run: uv run --locked pytest -q -m real_model --cov-append

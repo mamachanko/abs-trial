@@ -2,11 +2,14 @@ import json
 import logging
 import subprocess
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
 log = logging.getLogger(__name__)
 LAB = Path(__file__).resolve().parents[1] / "lab"
+FACADE = Path(__file__).parent / "fixtures" / "model-facade.cjs"
+RECEIPTS = "/home/ubuntu/facade-receipts.jsonl"
 
 
 def docker(*args):
@@ -33,10 +36,9 @@ def ubuntu_lab():
         docker("rm", "-fv", container)
 
 
-def assert_local_reply(container):
+def agent_turn(container, prompt, session_id):
     run = ["exec", "-u", "ubuntu", container]
     claw = "/home/ubuntu/.local/bin/openclaw"
-    prompt = "What is the capital of France? Answer with just the name of the city."
     log.info("Asking the OpenClaw gateway: %s", prompt)
     turn = json.loads(
         docker(
@@ -46,7 +48,7 @@ def assert_local_reply(container):
             "--agent",
             "main",
             "--session-id",
-            "asb-check",
+            session_id,
             "--message",
             prompt,
             "--json",
@@ -60,10 +62,69 @@ def assert_local_reply(container):
     model = result["meta"]["agentMeta"]
     log.info("Reply from %s/%s: %s", model["provider"], model["model"], reply)
     assert (model["provider"], model["model"]) == ("lab", "asb-local")
-    assert model["usage"]["output"] > 0
-    assert "paris" in reply.casefold(), reply
+    return reply, model
 
 
+def install_with_facade(container, *install_args):
+    log.info("Installing OpenClaw without model weights")
+    subprocess.run(
+        [
+            "asb",
+            "install",
+            "--skip-local-model",
+            "--container",
+            container,
+            *install_args,
+        ],
+        check=True,
+        timeout=1500,
+    )
+    run = ["exec", "-u", "ubuntu", container]
+    docker(*run, "test", "!", "-e", "/home/ubuntu/.local/share/asb-model")
+    script = "/tmp/model-facade.cjs"
+    docker("cp", str(FACADE), f"{container}:{script}")
+    docker(
+        "exec",
+        "-d",
+        "-u",
+        "ubuntu",
+        container,
+        "/home/ubuntu/.local/tools/node/bin/node",
+        script,
+        RECEIPTS,
+    )
+    models = docker(
+        *run,
+        "curl",
+        "-fsS",
+        "--retry",
+        "10",
+        "--retry-connrefused",
+        "--retry-delay",
+        "1",
+        "--max-time",
+        "3",
+        "-H",
+        "Authorization: Bearer asb-local",
+        "http://127.0.0.1:18080/v1/models",
+    )
+    assert [item["id"] for item in json.loads(models)["data"]] == ["asb-local"]
+
+
+def assert_facade_reply(container):
+    nonce = uuid4().hex
+    reply, _ = agent_turn(container, f"asb-check-{nonce}", f"asb-test-{nonce}")
+    events = docker("exec", "-u", "ubuntu", container, "cat", RECEIPTS)
+    receipts = [
+        event["receipt"]
+        for event in map(json.loads, events.splitlines())
+        if event["nonce"] == nonce
+    ]
+    assert len(receipts) == 1, receipts
+    assert reply == receipts[0]
+
+
+@pytest.mark.real_model
 def test_native_install_on_clean_ubuntu(ubuntu_lab):
     container = ubuntu_lab
     install = ["asb", "install", "--container", container]
@@ -104,7 +165,13 @@ def test_native_install_on_clean_ubuntu(ubuntu_lab):
     weights = Path(props["model_path"]).name
     log.info("Loaded model weights: %s", weights)
     assert weights == "LFM2.5-350M-Q4_K_M.gguf"
-    assert_local_reply(container)
+    reply, model = agent_turn(
+        container,
+        "What is the capital of France? Answer with just the name of the city.",
+        "asb-check",
+    )
+    assert "paris" in reply.casefold(), reply
+    assert model["usage"]["output"] > 0
     log.info("Stopping the container and repeating asb status")
     docker("stop", "-t", "3", container)
     stopped = subprocess.run(
@@ -117,9 +184,7 @@ def test_native_install_on_clean_ubuntu(ubuntu_lab):
 
 def test_invalid_gateway_mode_is_rejected(ubuntu_lab):
     log.info("Installing OpenClaw before testing a configuration change")
-    subprocess.run(
-        ["asb", "install", "--container", ubuntu_lab], check=True, timeout=1500
-    )
+    install_with_facade(ubuntu_lab)
     config = [
         "exec",
         "-u",
@@ -149,6 +214,7 @@ def test_invalid_gateway_mode_is_rejected(ubuntu_lab):
         ["asb", "status", "--container", ubuntu_lab], text=True, timeout=15
     )
     assert "gateway ready" in ready
+    assert_facade_reply(ubuntu_lab)
 
 
 def assert_gateway_version(container, expected):
@@ -175,17 +241,14 @@ def assert_gateway_version(container, expected):
     assert versions == [expected]
 
 
-def test_upgrade_preserves_lab_and_serves_local_reply(ubuntu_lab):
+def test_upgrade_preserves_lab_and_routes_to_provider(ubuntu_lab):
     container = ubuntu_lab
     run = ["exec", "-u", "ubuntu", container]
     claw = "/home/ubuntu/.local/bin/openclaw"
     log.info("Installing the upgrade baseline, OpenClaw 2026.11.5")
-    subprocess.run(
-        ["asb", "install", "--container", container, "--version", "2026.11.5"],
-        check=True,
-        timeout=1500,
-    )
+    install_with_facade(container, "--version", "2026.11.5")
     assert_gateway_version(container, "2026.11.5")
+    assert_facade_reply(container)
 
     log.info("Saving a workspace note and a custom OpenClaw setting before the upgrade")
     workspace = "/home/ubuntu/.openclaw/workspace"
@@ -214,17 +277,13 @@ def test_upgrade_preserves_lab_and_serves_local_reply(ubuntu_lab):
         docker(*run, claw, "config", "get", "agents.defaults.userTimezone")
         == "Europe/Berlin"
     )
-    assert_local_reply(container)
+    assert_facade_reply(container)
 
 
 def test_unavailable_upgrade_keeps_original_gateway_serving(ubuntu_lab):
     log.info("Installing the baseline and verifying its live gateway version")
     baseline = "2026.11.5"
-    subprocess.run(
-        ["asb", "install", "--container", ubuntu_lab, "--version", baseline],
-        check=True,
-        timeout=1500,
-    )
+    install_with_facade(ubuntu_lab, "--version", baseline)
     assert_gateway_version(ubuntu_lab, baseline)
 
     missing = "9999.1.1"
@@ -240,4 +299,4 @@ def test_unavailable_upgrade_keeps_original_gateway_serving(ubuntu_lab):
     assert missing in result.stderr, result.stderr
     assert "E404" in result.stderr, result.stderr
     assert_gateway_version(ubuntu_lab, baseline)
-    assert_local_reply(ubuntu_lab)
+    assert_facade_reply(ubuntu_lab)
