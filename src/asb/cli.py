@@ -46,12 +46,34 @@ def openclaw_main(ctx: typer.Context):
 
 @app.command()
 @openclaw.command()
-def install(container: Container = "asb-lab"):
+def install(
+    container: Container = "asb-lab",
+    version: Annotated[
+        str, typer.Option(help="Exact OpenClaw release to install (YYYY.M.N).")
+    ] = native.DEFAULT_VERSION,
+):
     """Install and start OpenClaw in a running Ubuntu container."""
     try:
-        result = native.install(container)
+        result = native.install(container, version)
     except (RuntimeError, OSError, ValueError) as exc:
         typer.echo(f"OpenClaw installation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(result)
+
+
+@app.command()
+@openclaw.command()
+def upgrade(
+    to: Annotated[
+        str, typer.Option("--to", help="Exact target OpenClaw release (YYYY.M.N).")
+    ],
+    container: Container = "asb-lab",
+):
+    """Upgrade OpenClaw while preserving the lab configuration and workspace."""
+    try:
+        result = native.upgrade(container, to)
+    except (RuntimeError, OSError, ValueError) as exc:
+        typer.echo(f"OpenClaw upgrade failed: {exc}", err=True)
         raise typer.Exit(1) from exc
     typer.echo(result)
 

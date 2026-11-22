@@ -3,6 +3,8 @@ import logging
 import subprocess
 from pathlib import Path
 
+import pytest
+
 log = logging.getLogger(__name__)
 LAB = Path(__file__).resolve().parents[1] / "lab"
 
@@ -11,7 +13,8 @@ def docker(*args):
     return subprocess.check_output(["docker", *args], text=True, timeout=300).strip()
 
 
-def test_native_install_on_clean_ubuntu():
+@pytest.fixture
+def ubuntu_lab():
     log.info("Starting a clean Ubuntu 24.04 container")
     image = docker("build", "--quiet", str(LAB))
     container = docker("run", "-d", "--init", image)
@@ -24,78 +27,155 @@ def test_native_install_on_clean_ubuntu():
             "-ec",
             "! command -v node && ! command -v openclaw && test ! -e /home/ubuntu/.local/bin/openclaw",
         )
-        install = ["asb", "install", "--container", container]
-        log.info(
-            "Running asb install: install Node, OpenClaw and the CPU model, then start the gateway"
-        )
-        subprocess.run(install, check=True, timeout=1500)
-        prefix = "/home/ubuntu/.local"
-        run = ["exec", "-u", "ubuntu", container]
-        log.info("Checking the installed versions as the ubuntu user")
-        node_version = docker(*run, f"{prefix}/tools/node/bin/node", "--version")
-        log.info("Node reported %s", node_version)
-        assert node_version == "v24.22.1"
-        claw = f"{prefix}/bin/openclaw"
-        claw_version = docker(*run, claw, "--version")
-        log.info("%s", claw_version)
-        assert "2026.11.6" in claw_version
-        log.info("Validating the OpenClaw configuration")
-        docker(*run, claw, "config", "validate")
-        mode = docker(*run, claw, "config", "get", "gateway.mode")
-        log.info("Configured gateway mode: %s", mode)
-        assert mode == "local"
-
-        status = ["asb", "status", "--container", container]
-        ready = subprocess.check_output(status, timeout=15, text=True)
-        log.info("asb status: %s", ready.strip())
-        assert "gateway ready" in ready
-        props = json.loads(
-            docker(
-                *run,
-                "curl",
-                "-fsS",
-                "-H",
-                "Authorization: Bearer asb-local",
-                "http://127.0.0.1:18080/props",
-            )
-        )
-        weights = Path(props["model_path"]).name
-        log.info("Loaded model weights: %s", weights)
-        assert weights == "LFM2.5-350M-Q4_K_M.gguf"
-        prompt = "What is the capital of France? Answer with just the name of the city."
-        log.info("Asking the OpenClaw gateway: %s", prompt)
-        turn = json.loads(
-            docker(
-                *run,
-                claw,
-                "agent",
-                "--agent",
-                "main",
-                "--session-id",
-                "asb-check",
-                "--message",
-                prompt,
-                "--json",
-                "--timeout",
-                "150",
-            )
-        )
-        assert turn["status"] == "ok", turn
-        result = turn["result"]
-        reply = " ".join(p["text"] for p in result["payloads"] if p.get("text"))
-        model = result["meta"]["agentMeta"]
-        log.info("Reply from %s/%s: %s", model["provider"], model["model"], reply)
-        assert (model["provider"], model["model"]) == ("lab", "asb-local")
-        assert model["usage"]["output"] > 0
-        assert "paris" in reply.casefold(), reply
-        log.info("Stopping the container and repeating asb status")
-        docker("stop", "-t", "3", container)
-        stopped = subprocess.run(
-            status, capture_output=True, text=True, timeout=15, check=False
-        )
-        log.info("asb status exited %s: %s", stopped.returncode, stopped.stderr.strip())
-        assert stopped.returncode == 1
-        assert "gateway unavailable" in stopped.stderr
+        yield container
     finally:
         log.info("Removing test container %s", container[:12])
         docker("rm", "-fv", container)
+
+
+def assert_local_reply(container):
+    run = ["exec", "-u", "ubuntu", container]
+    claw = "/home/ubuntu/.local/bin/openclaw"
+    prompt = "What is the capital of France? Answer with just the name of the city."
+    log.info("Asking the OpenClaw gateway: %s", prompt)
+    turn = json.loads(
+        docker(
+            *run,
+            claw,
+            "agent",
+            "--agent",
+            "main",
+            "--session-id",
+            "asb-check",
+            "--message",
+            prompt,
+            "--json",
+            "--timeout",
+            "150",
+        )
+    )
+    assert turn["status"] == "ok", turn
+    result = turn["result"]
+    reply = " ".join(p["text"] for p in result["payloads"] if p.get("text"))
+    model = result["meta"]["agentMeta"]
+    log.info("Reply from %s/%s: %s", model["provider"], model["model"], reply)
+    assert (model["provider"], model["model"]) == ("lab", "asb-local")
+    assert model["usage"]["output"] > 0
+    assert "paris" in reply.casefold(), reply
+
+
+def test_native_install_on_clean_ubuntu(ubuntu_lab):
+    container = ubuntu_lab
+    install = ["asb", "install", "--container", container]
+    log.info(
+        "Running asb install: install Node, OpenClaw and the CPU model, then start the gateway"
+    )
+    subprocess.run(install, check=True, timeout=1500)
+    prefix = "/home/ubuntu/.local"
+    run = ["exec", "-u", "ubuntu", container]
+    log.info("Checking the installed versions as the ubuntu user")
+    node_version = docker(*run, f"{prefix}/tools/node/bin/node", "--version")
+    log.info("Node reported %s", node_version)
+    assert node_version == "v24.22.1"
+    claw = f"{prefix}/bin/openclaw"
+    claw_version = docker(*run, claw, "--version")
+    log.info("%s", claw_version)
+    assert "2026.11.6" in claw_version
+    log.info("Validating the OpenClaw configuration")
+    docker(*run, claw, "config", "validate")
+    mode = docker(*run, claw, "config", "get", "gateway.mode")
+    log.info("Configured gateway mode: %s", mode)
+    assert mode == "local"
+
+    status = ["asb", "status", "--container", container]
+    ready = subprocess.check_output(status, timeout=15, text=True)
+    log.info("asb status: %s", ready.strip())
+    assert "gateway ready" in ready
+    props = json.loads(
+        docker(
+            *run,
+            "curl",
+            "-fsS",
+            "-H",
+            "Authorization: Bearer asb-local",
+            "http://127.0.0.1:18080/props",
+        )
+    )
+    weights = Path(props["model_path"]).name
+    log.info("Loaded model weights: %s", weights)
+    assert weights == "LFM2.5-350M-Q4_K_M.gguf"
+    assert_local_reply(container)
+    log.info("Stopping the container and repeating asb status")
+    docker("stop", "-t", "3", container)
+    stopped = subprocess.run(
+        status, capture_output=True, text=True, timeout=15, check=False
+    )
+    log.info("asb status exited %s: %s", stopped.returncode, stopped.stderr.strip())
+    assert stopped.returncode == 1
+    assert "gateway unavailable" in stopped.stderr
+
+
+def assert_gateway_version(container, expected):
+    probe = json.loads(
+        docker(
+            "exec",
+            "-u",
+            "ubuntu",
+            container,
+            "/home/ubuntu/.local/bin/openclaw",
+            "gateway",
+            "probe",
+            "--timeout",
+            "30000",
+            "--json",
+        )
+    )
+    versions = [
+        t["server"]["version"]
+        for t in probe["targets"]
+        if t["url"].rstrip("/") == "ws://127.0.0.1:18789" and t["connect"]["ok"]
+    ]
+    log.info("Live gateway reported %s", versions)
+    assert versions == [expected]
+
+
+def test_upgrade_preserves_lab_and_serves_local_reply(ubuntu_lab):
+    container = ubuntu_lab
+    run = ["exec", "-u", "ubuntu", container]
+    claw = "/home/ubuntu/.local/bin/openclaw"
+    log.info("Installing the upgrade baseline, OpenClaw 2026.11.5")
+    subprocess.run(
+        ["asb", "install", "--container", container, "--version", "2026.11.5"],
+        check=True,
+        timeout=1500,
+    )
+    assert_gateway_version(container, "2026.11.5")
+
+    log.info("Saving a workspace note and a custom OpenClaw setting before the upgrade")
+    workspace = "/home/ubuntu/.openclaw/workspace"
+    docker(*run, "mkdir", "-p", workspace)
+    docker(
+        *run,
+        "sh",
+        "-c",
+        'echo "saved before upgrade" > "$1/upgrade-note.txt"',
+        "_",
+        workspace,
+    )
+    docker(*run, claw, "config", "set", "agents.defaults.userTimezone", "Europe/Berlin")
+
+    log.info("Upgrading the same lab to OpenClaw 2026.11.6")
+    subprocess.run(
+        ["asb", "openclaw", "upgrade", "--container", container, "--to", "2026.11.6"],
+        check=True,
+        timeout=1500,
+    )
+    assert_gateway_version(container, "2026.11.6")
+    assert (
+        docker(*run, "cat", f"{workspace}/upgrade-note.txt") == "saved before upgrade"
+    )
+    assert (
+        docker(*run, claw, "config", "get", "agents.defaults.userTimezone")
+        == "Europe/Berlin"
+    )
+    assert_local_reply(container)
