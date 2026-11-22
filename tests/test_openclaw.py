@@ -49,6 +49,19 @@ def test_native_install_on_clean_ubuntu():
         ready = subprocess.check_output(status, timeout=15, text=True)
         log.info("asb status: %s", ready.strip())
         assert "gateway ready" in ready
+        props = json.loads(
+            docker(
+                *run,
+                "curl",
+                "-fsS",
+                "-H",
+                "Authorization: Bearer asb-local",
+                "http://127.0.0.1:18080/props",
+            )
+        )
+        weights = Path(props["model_path"]).name
+        log.info("Loaded model weights: %s", weights)
+        assert weights == "LFM2.5-350M-Q4_K_M.gguf"
         prompt = "What is the capital of France? Answer with just the name of the city."
         log.info("Asking the OpenClaw gateway: %s", prompt)
         turn = json.loads(

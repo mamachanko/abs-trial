@@ -37,7 +37,7 @@ fi
 backend="$HOME/.local/share/asb-model"
 release=b7772
 server="$backend/llama-$release/llama-server"
-model=qwen2.5-0.5b-instruct-q4_k_m.gguf
+model=LFM2.5-350M-Q4_K_M.gguf
 mkdir -p "$backend"
 fetch_verified() {
     local url=$1 file=$2 sha=$3
@@ -58,8 +58,8 @@ if [[ ! -x "$server" ]]; then
 fi
 if [[ ! -f "$backend/$model" ]]; then
     echo "Downloading $model"
-    fetch_verified "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/$model" \
-        "$backend/$model" 74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db
+    fetch_verified "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF/resolve/657e078c94084481950a2d555a941481f715536b/$model" \
+        "$backend/$model" 7e6f72643caafc9a68256686638c4d7916f2cec76d1df478d4c3ddcd95a6aed4
 fi
 model_ready() {
     curl -fsS --max-time 2 -H 'Authorization: Bearer asb-local' \
@@ -67,6 +67,21 @@ model_ready() {
         grep -Eq '"id"[[:space:]]*:[[:space:]]*"asb-local"'
 }
 pid=$(cat "$backend/server.pid" 2>/dev/null || true)
+# Replace the previous Qwen model on a live reinstall.
+if [[ "$pid" =~ ^[1-9][0-9]*$ && $(readlink "/proc/$pid/exe" || true) == "$server" ]]; then
+    mapfile -d '' -t args < "/proc/$pid/cmdline"
+    if [[ ${args[1]:-} == --model && ${args[2]:-} == "$backend/qwen2.5-0.5b-instruct-q4_k_m.gguf" ]]; then
+        kill -- "$pid"
+        for ((i=0; i<30; i++)); do
+            [[ $(readlink "/proc/$pid/exe" || true) != "$server" ]] && break
+            sleep 1
+        done
+        if [[ $(readlink "/proc/$pid/exe" || true) == "$server" ]]; then
+            echo 'Previous lab inference server did not stop.' >&2; exit 1
+        fi
+        pid=
+    fi
+fi
 if [[ -z "$pid" || $(readlink "/proc/$pid/exe" || true) != "$server" ]]; then
     nohup "$server" --model "$backend/$model" --alias asb-local --host 127.0.0.1 --port 18080 \
         --api-key asb-local --ctx-size 8192 --parallel 1 --threads 2 --threads-batch 2 \
@@ -90,7 +105,7 @@ model_ready || { echo "Model failed to start. See $backend/server.log" >&2; exit
     "api": "openai-completions",
     "apiKey": "asb-local",
     "models": [{
-      "id": "asb-local", "name": "Qwen2.5 0.5B Instruct",
+      "id": "asb-local", "name": "LFM2.5 350M",
       "contextWindow": 8192, "maxTokens": 64, "reasoning": false,
       "compat": {"supportsTools": false, "supportsDeveloperRole": false}
     }]
