@@ -79,21 +79,24 @@ Use an exact release with `--to`. ASB checks that the release is available befor
 
 ## What CI verifies
 
-Each integration test gets a fresh container and drives the installed tools. [Integration tests](tests/test_openclaw.py)
+Each integration test starts with clean Ubuntu and drives the real ASB CLI and OpenClaw gateway. The clean-install smoke test uses llama.cpp and the pinned LFM2.5 weights. The three maintenance tests use `asb install --skip-local-model`, which configures the same provider endpoint and skips downloading and starting the inference runtime.
+
+For those tests, pytest starts a small HTTP server on port 18080 inside the lab using the Node runtime ASB just installed. Each probe sends a unique ID through the gateway. The server records the ID, generates a receipt, and streams it back. Pytest checks that the CLI received the exact receipt the server recorded for that prompt. [Provider fixture](tests/fixtures/model-facade.cjs) · [Integration tests](tests/test_openclaw.py) · [Model trial results](docs/experiments/model-testing.md)
 
 | Scenario | What must happen |
 | --- | --- |
 | Clean install | ASB installs Node and OpenClaw. The local model answers through the gateway. Stopping the container makes `asb status` fail. |
-| Invalid configuration | OpenClaw rejects `gateway.mode=sideways`, retains `local`, and the gateway stays ready. |
-| In-place upgrade | The live gateway moves from 2026.11.5 to 2026.11.6. A workspace note and a custom timezone survive, and the local model answers a fresh prompt. |
-| Unavailable release | ASB rejects the upgrade. The gateway still reports its original version and answers through the local model. |
+| Invalid configuration | OpenClaw rejects `gateway.mode=sideways`, retains `local`, and routes a fresh turn to the provider. |
+| In-place upgrade | The live gateway moves from 2026.11.5 to 2026.11.6. A workspace note and a custom timezone survive, and a fresh receipt comes back through the upgraded gateway. |
+| Unavailable release | ASB rejects the upgrade. The gateway still reports its original version and delivers a fresh receipt from the provider. |
 
 To watch just the two upgrade cases, run `uv run --locked pytest -v -s --log-cli-level=INFO -k upgrade tests/test_openclaw.py`.
 
-Run the same lint, format, and test checks as GitHub Actions. Pytest reports Python line and branch coverage. [CI workflow](.github/workflows/ci.yml)
+Run the two CI test selections independently, or use `uv run --locked pytest` for both. The smoke test downloads the model weights. Pytest reports Python line and branch coverage. [CI workflow](.github/workflows/ci.yml)
 
 ```sh
 uv run --locked ruff check .
 uv run --locked ruff format --check .
-uv run --locked pytest -q
+uv run --locked pytest -q -m 'not real_model'
+uv run --locked pytest -q -m real_model --cov-append
 ```

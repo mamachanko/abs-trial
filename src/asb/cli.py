@@ -51,10 +51,17 @@ def install(
     version: Annotated[
         str, typer.Option(help="Exact OpenClaw release to install (YYYY.M.N).")
     ] = native.DEFAULT_VERSION,
+    skip_local_model: Annotated[
+        bool,
+        typer.Option(
+            "--skip-local-model",
+            help="Use your own model at 127.0.0.1:18080; skip the local runtime and weights.",
+        ),
+    ] = False,
 ):
     """Install and start OpenClaw in a running Ubuntu container."""
     try:
-        result = native.install(container, version)
+        result = native.install(container, version, skip_local_model=skip_local_model)
     except (RuntimeError, OSError, ValueError) as exc:
         typer.echo(f"OpenClaw installation failed: {exc}", err=True)
         raise typer.Exit(1) from exc

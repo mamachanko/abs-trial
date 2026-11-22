@@ -23,4 +23,5 @@ branch = true
 source = ["asb"]
 
 [tool.pytest.ini_options]
+markers = ["real_model: installs llama.cpp and runs inference with the pinned model weights"]
 addopts = "--cov=asb --cov-report=term-missing"
