@@ -115,6 +115,42 @@ def test_native_install_on_clean_ubuntu(ubuntu_lab):
     assert "gateway unavailable" in stopped.stderr
 
 
+def test_invalid_gateway_mode_is_rejected(ubuntu_lab):
+    log.info("Installing OpenClaw before testing a configuration change")
+    subprocess.run(
+        ["asb", "install", "--container", ubuntu_lab], check=True, timeout=1500
+    )
+    config = [
+        "exec",
+        "-u",
+        "ubuntu",
+        ubuntu_lab,
+        "/home/ubuntu/.local/bin/openclaw",
+        "config",
+    ]
+    assert docker(*config, "get", "gateway.mode") == "local"
+
+    log.info("Trying to set gateway.mode to sideways")
+    result = subprocess.run(
+        ["docker", *config, "set", "gateway.mode", "sideways"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert "invalid config" in result.stderr.lower(), result.stderr
+    assert "gateway.mode" in result.stderr, result.stderr
+    log.info("OpenClaw rejected the change: %s", result.stderr.strip())
+
+    assert docker(*config, "get", "gateway.mode") == "local"
+    docker(*config, "validate")
+    ready = subprocess.check_output(
+        ["asb", "status", "--container", ubuntu_lab], text=True, timeout=15
+    )
+    assert "gateway ready" in ready
+
+
 def assert_gateway_version(container, expected):
     probe = json.loads(
         docker(
